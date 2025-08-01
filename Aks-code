@@ -1,24 +1,33 @@
-trigger:
-- main
+
+trigger: none  # This is CD; you can trigger manually or from CI if needed
 
 stages:
 - stage: Deploy
   displayName: Deploy to AKS
   jobs:
-  - job: DeployToAKS
-    displayName: Deploy to Azure Kubernetes Service
+  - job: Deploy
+    displayName: Deploy Spring Boot App to AKS
     pool:
-      vmImage: ubuntu-latest
+      vmImage: 'ubuntu-latest'
     steps:
-    - task: Kubernetes@1
-      displayName: Deploy to AKS
+    - checkout: self
+
+    - task: AzureCLI@2
+      displayName: Set AKS Context
       inputs:
-        connectionType: 'Azure Resource Manager'
         azureSubscription: 'for-modifiedcode'
-        azureResourceGroup: 'myResourceGroup'
-        kubernetesCluster: 'myAKSCluster'
-        namespace: 'default'
-        command: 'apply'
-        useConfigurationFile: true
-        configuration: 'springboot-app-main/aks-deploy-from-acr.yaml'
-        secretType: 'None'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az aks get-credentials --resource-group myResourceGroup --name myAKSCluster --overwrite-existing
+
+    - task: KubernetesManifest@1
+      displayName: Deploy Manifest
+      inputs:
+        action: deploy
+        kubernetesServiceConnection: 'for-modifiedcode'
+        namespace: default
+        manifests: |
+          springboot-app-main/aks-deploy-from-acr.yaml
+        containers: |
+          myacrrepo7066.azurecr.io/web_application:$(Build.BuildId)
