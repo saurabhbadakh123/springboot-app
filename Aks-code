@@ -1,22 +1,22 @@
-trigger: none  # CD pipeline typically triggers from a release or artifact
+trigger: none  # CD pipelines are usually triggered by releases or artifacts
 
 stages:
-- stage: DeployToAKS
+- stage: Deploy
   displayName: 'Deploy to AKS'
   jobs:
-  - job: Deploy
-    displayName: 'Deploy using kubectl'
+  - job: DeployToAKS
+    displayName: 'Deploy to Azure Kubernetes Service'
     pool:
       vmImage: 'ubuntu-latest'
 
     steps:
-
     - task: DownloadPipelineArtifact@2
       inputs:
         artifact: 'drop'
         path: '$(System.DefaultWorkingDirectory)/drop'
 
-    - task: replacetokens@6
+    - task: qetza.replacetokens.replacetokens-task.replacetokens@6
+      displayName: 'Replace tokens'
       inputs:
         rootDirectory: '$(System.DefaultWorkingDirectory)/drop'
         targetFiles: 'aks-deploy-from-acr.yaml'
@@ -28,17 +28,13 @@ stages:
         encoding: 'auto'
         escapeType: 'auto'
 
-    - task: KubectlInstaller@0
-      inputs:
-        kubectlVersion: 'latest'
-
     - task: Kubernetes@1
       displayName: 'kubectl apply'
       inputs:
         connectionType: 'Azure Resource Manager'
-        azureSubscriptionEndpoint: '<your-service-connection-name>'  # e.g., 'for-modifiedcode'
+        azureSubscriptionEndpoint: '<your-service-connection-name>'
         azureResourceGroup: 'myResourceGroup'
-        kubernetesCluster: 'myAKSCluster'
+        kubernetesCluster: 'myAKSCluster1'
         namespace: 'default'
         command: 'apply'
         useConfigurationFile: true
