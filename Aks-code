@@ -1,63 +1,42 @@
-name: my-CD-pipeline
-
 trigger: none
 
-resources:
-  pipelines:
-  - pipeline: cipipeline
-    source: Web_Application
-    trigger: 
-      enabled: true  # Auto-trigger when CI completes
-
 variables:
-  imageName: 'springboot-app'
-  # Get the tag from the CI pipeline
-  tag: $[ variables['resources.pipeline.cipipeline.buildId'] ]  
+  dockerRegistryServiceConnection: 'for-modifiedcode'
+  imageRepository: 'springboot-app'
+  containerRegistry: 'myacrrepo7066.azurecr.io'
+  dockerfilePath: 'springboot-app-main/Dockerfile'
+  tag: '$(Build.BuildId)'  # Fixed variable name
   acrLoginServer: 'myacrrepo7066.azurecr.io'
 
 pool:
   vmImage: 'ubuntu-latest'
 
-stages:
-- stage: Deploy
-  displayName: Deploy to AKS
-  jobs:
-  - job: Deploy
-    displayName: Deploy Spring Boot App to AKS
-    steps:
-    - checkout: self
-      # Clean the working directory to prevent path issues
-      clean: true  
+steps:
+- task: Maven@3  # Fixed typo (was Naven@3)
+  inputs:
+    mavenPomFile: 'springboot-app-main/pom.xml'
+    goals: 'package'
+    publishJUnitResults: true
+    testResultsFiles: '**/surefire-reports/TEST-*.xml'
+  displayName: 'Build Spring Boot App'
 
-    - task: AzureCLI@2
-      displayName: 'Configure AKS Access'
-      inputs:
-        azureSubscription: 'serviceconnection-azurecli'
-        scriptType: 'bash'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          # Attach ACR to AKS (one-time setup)
-          az aks update -n myAKSCluster -g myResourceGroup --attach-acr myacrrepo7066
-          # Get AKS credentials
-          az aks get-credentials --resource-group myResourceGroup --name myAKSCluster --overwrite-existing
+- task: Docker@2
+  displayName: 'Build and Push Docker Image'
+  inputs:
+    command: 'buildAndPush'
+    repository: '$(imageRepository)'  # Fixed parentheses
+    dockerfile: '$(dockerfilePath)'   # Fixed parentheses
+    containerRegistry: '$(dockerRegistryServiceConnection)'  # Fixed parentheses
+    tags: '$(tag)'
 
-    - script: |
-        echo "Using tag from CI pipeline: $(tag)"
-        # Verify the exact file path
-        ls -R k8s  
-        # Update deployment.yaml with the correct path
-        sed -i "s#__IMAGE_TAG__#$(tag)#g" k8s/deployment.yaml
-        echo "Deploying: $(acrLoginServer)/$(imageName):$(tag)"
-        cat k8s/deployment.yaml  # Debug output
-      displayName: 'Update Image Tag'
-
-    - task: Kubernetes@1
-      displayName: 'Apply Deployment'
-      inputs:
-        connectionType: 'Azure Resource Manager'
-        azureSubscriptionEndpoint: 'serviceconnection-azurecli'
-        azureResourceGroup: 'myResourceGroup'
-        kubernetesCluster: 'myAKSCluster'
-        command: 'apply'
-        useConfigurationFile: true
-        configuration: 'k8s/deployment.yaml'  # Fixed file extension (.yaml not .yml)
+- task: AzureCLI@2  # More reliable than plain script
+  displayName: 'Validate ACR Image'
+  inputs:
+    azureSubscription: 'for-modifiedcode'  # Same as dockerRegistryServiceConnection
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Verifying image exists: $(acrLoginServer)/$(imageRepository):$(tag)"
+      az acr repository show \
+        --name myacrrepo7066 \
+        --image $(imageRepository):$(tag) || exit 1
