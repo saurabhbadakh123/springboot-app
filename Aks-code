@@ -1,41 +1,60 @@
-trigger: none  # CD pipelines are usually triggered by releases or artifacts
+name: my-CD-pipeline
+trigger: none
 
-stages:
-- stage: Deploy
-  displayName: 'Deploy to AKS'
-  jobs:
-  - job: DeployToAKS
-    displayName: 'Deploy to Azure Kubernetes Service'
-    pool:
-      vmImage: 'ubuntu-latest'
+resources:
+  pipelines:
+    - pipeline: buildPipeline
+      source: Web_Application
+      trigger: none
 
-    steps:
-    - task: DownloadPipelineArtifact@2
-      inputs:
-        artifact: 'drop'
-        path: '$(System.DefaultWorkingDirectory)/drop'
+variables:
+  acrName: 'myacrrepo7066'
+  imageName: 'springboot-app'
+  manifestFile: 'springboot-app-main/aks-deploy-from-acr.yaml'  # Your manifest path
 
-    - task: qetza.replacetokens.replacetokens-task.replacetokens@6
-      displayName: 'Replace tokens'
-      inputs:
-        rootDirectory: '$(System.DefaultWorkingDirectory)/drop'
-        targetFiles: 'aks-deploy-from-acr.yaml'
-        tokenPattern: 'custom'
-        customTokenPattern: '#{(\w+)}#'
-        writeBOM: false
-        actionOnMissing: 'warn'
-        keepToken: false
-        encoding: 'auto'
-        escapeType: 'auto'
+pool:
+  vmImage: 'ubuntu-latest'
 
-    - task: Kubernetes@1
-      displayName: 'kubectl apply'
-      inputs:
-        connectionType: 'Azure Resource Manager'
-        azureSubscriptionEndpoint: '<your-service-connection-name>'
-        azureResourceGroup: 'myResourceGroup'
-        kubernetesCluster: 'myAKSCluster1'
-        namespace: 'default'
-        command: 'apply'
-        useConfigurationFile: true
-        configuration: '$(System.DefaultWorkingDirectory)/drop/aks-deploy-from-acr.yaml'
+steps:
+1. Checkout & Setup:
+   - checkout: self
+   - task: AzureCLI@2
+     displayName: 'Connect to AKS'
+     inputs:
+       azureSubscription: 'serviceconnection-azurecli'
+       scriptType: 'bash'
+       inlineScript: |
+         az aks get-credentials -g myResourceGroup -n myAKSCluster
+         az aks update -g myResourceGroup -n myAKSCluster --attach-acr ${{ variables.acrName }}
+
+2. Update & Deploy:
+   - script: |
+       # Get latest existing tag (e.g. 223)
+       LATEST_TAG=$(az acr repository show-tags \
+         --name ${{ variables.acrName }} \
+         --repository ${{ variables.imageName }} \
+         --orderby time_desc \
+         --top 1 \
+         --output tsv)
+
+       # Update manifest with REAL tag
+       sed -i "s#__IMAGE_TAG__#$LATEST_TAG#g" ${{ variables.manifestFile }}
+       echo "✅ Using verified image: $LATEST_TAG"
+     displayName: 'Update Image Tag'
+
+   - task: Kubernetes@1
+     displayName: 'Apply Deployment'
+     inputs:
+       connectionType: 'Azure Resource Manager'
+       azureSubscriptionEndpoint: 'serviceconnection-azurecli'
+       azureResourceGroup: 'myResourceGroup'
+       kubernetesCluster: 'myAKSCluster'
+       command: 'apply'
+       useConfigurationFile: true
+       configuration: ${{ variables.manifestFile }}
+
+3. Verify:
+   - script: |
+       kubectl rollout status deployment/my-springboot-deployment --timeout=300s
+       kubectl get pods -l app=springboot-app
+     displayName: 'Verify Deployment'
