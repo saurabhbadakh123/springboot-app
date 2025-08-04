@@ -1,11 +1,10 @@
 variables:
-  dockerRegistryServiceConnection: 'for-modifiedcode'  # Azure DevOps service connection name
+  dockerRegistryServiceConnection: 'for-modifiedcode'  # Azure DevOps ACR service connection
   imageRepository: 'springboot-app'
   containerRegistry: 'myacrrepo7066.azurecr.io'
   dockerfilePath: 'springboot-app-main/Dockerfile'
-  tag: '$(Build.BuildNumber)'  # Ensure this matches CD's expected format
+  tag: '$(Build.BuildNumber)'  # Dynamically set by Azure DevOps
   acrLoginServer: 'myacrrepo7066.azurecr.io'
-  imageName: 'springboot-app'
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -20,20 +19,61 @@ steps:
   displayName: 'Build Spring Boot App'
 
 - task: Docker@2
-  displayName: 'Build Docker Image'
+  displayName: 'Build and Push Docker Image'
   inputs:
-    command: 'build'
+    command: 'buildAndPush'
     repository: '$(imageRepository)'
     dockerfile: '$(dockerfilePath)'
     containerRegistry: '$(dockerRegistryServiceConnection)'
-    tags: |
-      $(tag)
+    tags: '$(tag)'
 
-- task: Docker@2
-  displayName: 'Push Docker Image'
-  inputs:
-    command: 'push'
-    repository: '$(imageRepository)'
-    containerRegistry: '$(dockerRegistryServiceConnection)'
-    tags: |
-      $(tag)
+- script: |  # Verify the image was pushed
+    echo "Verifying image exists in ACR: $(acrLoginServer)/$(imageRepository):$(tag)"
+    az acr repository show --name myacrrepo7066 --image $(imageRepository):$(tag) || exit 1
+  displayName: 'Validate ACR Image'
+
+
+variables:
+  imageName: 'springboot-app'
+  acrLoginServer: 'myacrrepo7066.azurecr.io'
+  # Use the SAME tag as CI (passed as pipeline variable or from trigger)
+  tag: '$(Build.BuildNumber)'  
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+- stage: Deploy
+  displayName: 'Deploy to AKS'
+  jobs:
+  - job: Deploy
+    steps:
+    - checkout: self
+
+    - task: AzureCLI@2
+      displayName: 'Configure AKS Access'
+      inputs:
+        azureSubscription: 'serviceconnection-azurecli'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az aks get-credentials --resource-group myResourceGroup --name myAKSCluster --overwrite-existing
+          # Verify ACR integration
+          az aks check-acr -n myAKSCluster -g myResourceGroup --acr myacrrepo7066.azurecr.io
+
+    - script: |
+        echo "Deploying image: $(acrLoginServer)/$(imageName):$(tag)"
+        sed -i "s#__IMAGE_TAG__#$(tag)#g" springboot-app-main/aks-deploy-from-acr.yaml
+        cat springboot-app-main/aks-deploy-from-acr.yaml  # Debug output
+      displayName: 'Update Deployment YAML'
+
+    - task: Kubernetes@1
+      displayName: 'Deploy to AKS'
+      inputs:
+        connectionType: 'Azure Resource Manager'
+        azureSubscriptionEndpoint: 'serviceconnection-azurecli'
+        azureResourceGroup: 'myResourceGroup'
+        kubernetesCluster: 'myAKSCluster'
+        command: 'apply'
+        useConfigurationFile: true
+        configuration: 'springboot-app-main/aks-deploy-from-acr.yaml'
