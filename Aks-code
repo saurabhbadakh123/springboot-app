@@ -1,77 +1,55 @@
 name: my-CD-pipeline
+
 trigger: none
 
 resources:
   pipelines:
     - pipeline: buildPipeline
-      source: Web_Application
-      trigger: none
+      source: 'Web_Application'
+      trigger:
+        branches:
+          include:
+            - main
 
 variables:
-  ACR_NAME: 'myacrrepo7066'  # Must match exactly
-  IMAGE_NAME: 'springboot-app'
-  AKS_CLUSTER: 'myAKSCluster'
-  RESOURCE_GROUP: 'myResourceGroup'
-  MANIFEST_FILE: 'springboot-app-main/aks-deploy-from-acr.yaml'
+  imageName: 'springboot-app'
+  tag: '$(Build.BuildId)'
+  acrLoginServer: 'myacrrepo7066.azurecr.io'
 
 pool:
   vmImage: 'ubuntu-latest'
 
-steps:
-1. Checkout & Setup:
-   - checkout: self
-   - task: AzureCLI@2
-     displayName: 'Connect to AKS'
-     inputs:
-       azureSubscription: 'serviceconnection-azurecli'
-       scriptType: 'bash'
-       inlineScript: |
-         az aks get-credentials -g $(RESOURCE_GROUP) -n $(AKS_CLUSTER) --overwrite-existing
-         az aks update -g $(RESOURCE_GROUP) -n $(AKS_CLUSTER) --attach-acr $(ACR_NAME)
+stages:
+  - stage: Deploy
+    displayName: 'Deploy to AKS'
+    jobs:
+      - job: Deploy
+        displayName: 'Deploy Spring Boot App to AKS'
+        steps:
+          - checkout: self
 
-2. Prepare Manifest:
-   - script: |
-       # Fix YAML formatting issues first
-       sed -i 's/_IMAGE_TAG_imggePullPolicy/__IMAGE_TAG__\n        imagePullPolicy/g' $(MANIFEST_FILE)
-       
-       # Get latest existing tag (e.g. 223)
-       LATEST_TAG=$(az acr repository show-tags \
-         --name $(ACR_NAME) \
-         --repository $(IMAGE_NAME) \
-         --orderby time_desc \
-         --top 1 \
-         --output tsv)
-       
-       echo "##[section]Deploying image: $(ACR_NAME).azurecr.io/$(IMAGE_NAME):$LATEST_TAG"
-       sed -i "s#__IMAGE_TAG__#$LATEST_TAG#g" $(MANIFEST_FILE)
-       
-       # Validate YAML syntax
-       if ! kubectl apply -f $(MANIFEST_FILE) --dry-run=client >/dev/null; then
-         echo "##vso[task.logissue type=error]Invalid YAML in manifest!"
-         exit 1
-       fi
-     displayName: 'Prepare Manifest'
+          - task: AzureCLI@2
+            displayName: 'Set AKS Context'
+            inputs:
+              azureSubscription: 'serviceconnection-azurecli'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                az aks get-credentials --resource-group myResourceGroup --name myAKSCluster --overwrite-existing
+                az aks update -n myAKSCluster -g myResourceGroup --attach-acr myacrrepo7066
 
-3. Deploy:
-   - task: Kubernetes@1
-     displayName: 'Apply Deployment'
-     inputs:
-       connectionType: 'Azure Resource Manager'
-       azureSubscriptionEndpoint: 'serviceconnection-azurecli'
-       azureResourceGroup: $(RESOURCE_GROUP)
-       kubernetesCluster: $(AKS_CLUSTER)
-       command: 'apply'
-       useConfigurationFile: true
-       configuration: $(MANIFEST_FILE)
+          - script: |
+              sed -i "s#__IMAGE_TAG__#$(tag)#g" springboot-app-main/aks-deploy-from-acr.yaml
+              echo "Using Image: $(acrLoginServer)/$(imageName):$(tag)"
+            displayName: 'Update Image Tag in Manifest'
 
-4. Verify:
-   - script: |
-       echo "##[section]Verifying deployment..."
-       kubectl rollout status deployment/my-springboot-deployment --timeout=300s
-       echo ""
-       echo "Current pods:"
-       kubectl get pods -l app=springboot-app
-       echo ""
-       echo "Deployed image:"
-       kubectl get deploy my-springboot-deployment -o jsonpath='{.spec.template.spec.containers[0].image}'
-     displayName: 'Verify Deployment'
+          - task: Kubernetes@1
+            displayName: 'Apply Deployment'
+            inputs:
+              connectionType: 'Azure Resource Manager'
+              azureSubscriptionEndpoint: 'serviceconnection-azurecli'
+              azureResourceGroup: 'myResourceGroup'
+              kubernetesCluster: 'myAKSCluster'
+              command: 'apply'
+              useConfigurationFile: true
+              configuration: 'springboot-app-main/aks-deploy-from-acr.yaml'
