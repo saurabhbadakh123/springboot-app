@@ -1,55 +1,67 @@
 name: my-CD-pipeline
-
-trigger: none
+trigger: none  # Trigger manually or from CI completion
 
 resources:
   pipelines:
     - pipeline: buildPipeline
-      source: 'Web_Application'
-      trigger:
-        branches:
-          include:
-            - main
+      source: 'Web_Application'  # Must match your CI pipeline name
+      trigger: 
+        branches: [main]
 
 variables:
-  imageName: 'springboot-app'
-  tag: '$(Build.BuildId)'
-  acrLoginServer: 'myacrrepo7066.azurecr.io'
+  ACR_NAME: 'myacrrepo7066'  # Fixed typo from your CI (removed extra 'p')
+  AKS_CLUSTER: 'myAKSCluster'
+  RESOURCE_GROUP: 'myResourceGroup'
 
 pool:
   vmImage: 'ubuntu-latest'
 
 stages:
-  - stage: Deploy
-    displayName: 'Deploy to AKS'
-    jobs:
-      - job: Deploy
-        displayName: 'Deploy Spring Boot App to AKS'
-        steps:
-          - checkout: self
+- stage: Deploy
+  displayName: 'Deploy to AKS'
+  jobs:
+  - job: Deploy
+    steps:
+    # 1. Checkout and setup
+    - checkout: self
+    
+    # 2. Connect to AKS and grant ACR access
+    - task: AzureCLI@2
+      displayName: 'Connect to AKS'
+      inputs:
+        azureSubscription: 'serviceconnection-azurecli'
+        scriptType: 'bash'
+        inlineScript: |
+          az aks get-credentials -g $(RESOURCE_GROUP) -n $(AKS_CLUSTER)
+          az aks update -g $(RESOURCE_GROUP) -n $(AKS_CLUSTER) --attach-acr $(ACR_NAME)
 
-          - task: AzureCLI@2
-            displayName: 'Set AKS Context'
-            inputs:
-              azureSubscription: 'serviceconnection-azurecli'
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-                az aks get-credentials --resource-group myResourceGroup --name myAKSCluster --overwrite-existing
-                az aks update -n myAKSCluster -g myResourceGroup --attach-acr myacrrepo7066
+    # 3. Get the EXACT build ID from CI pipeline
+    - script: |
+        CI_BUILD_ID=$(resources.pipeline.buildPipeline.runID)
+        echo "##vso[task.setvariable variable=BUILD_TAG]$CI_BUILD_ID"
+        echo "Using build ID from CI pipeline: $CI_BUILD_ID"
+      displayName: 'Get CI Build ID'
 
-          - script: |
-              sed -i "s#__IMAGE_TAG__#$(tag)#g" springboot-app-main/aks-deploy-from-acr.yaml
-              echo "Using Image: $(acrLoginServer)/$(imageName):$(tag)"
-            displayName: 'Update Image Tag in Manifest'
+    # 4. Verify image exists in ACR before deployment
+    - script: |
+        if ! az acr repository show \
+          --name $(ACR_NAME) \
+          --image springboot-app:$(BUILD_TAG) > /dev/null; then
+          echo "##vso[task.logissue type=error]Image springboot-app:$(BUILD_TAG) not found in ACR!"
+          exit 1
+        fi
+      displayName: 'Verify Image Exists'
 
-          - task: Kubernetes@1
-            displayName: 'Apply Deployment'
-            inputs:
-              connectionType: 'Azure Resource Manager'
-              azureSubscriptionEndpoint: 'serviceconnection-azurecli'
-              azureResourceGroup: 'myResourceGroup'
-              kubernetesCluster: 'myAKSCluster'
-              command: 'apply'
-              useConfigurationFile: true
-              configuration: 'springboot-app-main/aks-deploy-from-acr.yaml'
+    # 5. Deploy using kubectl (simpler than YAML replacement)
+    - script: |
+        kubectl set image deployment/my-springboot-deployment \
+          my-springboot-app=$(ACR_NAME).azurecr.io/springboot-app:$(BUILD_TAG)
+      displayName: 'Deploy to AKS'
+
+    # 6. Verify deployment
+    - script: |
+        kubectl rollout status deployment/my-springboot-deployment --timeout=300s
+        echo ""
+        echo "Current pods:"
+        kubectl get pods -l app=springboot-app
+      displayName: 'Verify Deployment'
