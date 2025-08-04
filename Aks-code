@@ -1,16 +1,3 @@
-trigger: none
-
-variables:
-  dockerRegistryServiceConnection: 'for-modifiedcode'
-  imageRepository: 'springboot-app'
-  containerRegistry: 'myacrrepo7066.azurecr.io'
-  dockerfilePath: 'springboot-app-main/Dockerfile'
-  tag: '$(Build.BuildId)'
-  acrLoginServer: 'myacrrepo7066.azurecr.io'
-
-pool:
-  vmImage: 'ubuntu-latest'
-
 steps:
 # 1. Build Java application
 - task: Maven@3
@@ -21,29 +8,26 @@ steps:
     testResultsFiles: '**/surefire-reports/TEST-*.xml'
   displayName: 'Build Spring Boot App'
 
-# 2. Verify JAR exists before Docker build
+# 2. Prepare Docker build context
 - script: |
     echo "Checking for JAR file..."
     ls -la springboot-app-main/target/*.jar
+    
+    echo "Creating docker directory..."
+    mkdir -p springboot-app-main/docker
+    
+    echo "Copying JAR file..."
     cp springboot-app-main/target/*.jar springboot-app-main/docker/
+    
+    echo "Verifying copy..."
+    ls -la springboot-app-main/docker/
   displayName: 'Prepare Docker Build Context'
 
 # 3. Build and push Docker image
 - script: |
     echo "Building image with tag: $(tag)"
     cd springboot-app-main/docker
-    docker build -t $(acrLoginServer)/$(imageRepository):$(tag) .
+    docker build -t $(acrLoginServer)/$(imageRepository):$(tag) -f ../Dockerfile .
     docker images
     docker push $(acrLoginServer)/$(imageRepository):$(tag)
   displayName: 'Build and Push Docker Image'
-
-# 4. Verify image in ACR
-- task: AzureCLI@2
-  displayName: 'Validate ACR Image'
-  inputs:
-    azureSubscription: 'for-modifiedcode'
-    scriptType: 'bash'
-    scriptLocation: 'inlineScript'
-    inlineScript: |
-      echo "Verifying image exists: $(acrLoginServer)/$(imageRepository):$(tag)"
-      az acr repository show --name myacrrepo7066 --image $(imageRepository):$(tag)
