@@ -1,67 +1,50 @@
-name: my-CD-pipeline
-trigger: none  # Trigger manually or from CI completion
-
-resources:
-  pipelines:
-    - pipeline: buildPipeline
-      source: 'Web_Application'  # Must match your CI pipeline name
-      trigger: 
-        branches: [main]
-
-variables:
-  ACR_NAME: 'myacrrepo7066'  # Fixed typo from your CI (removed extra 'p')
-  AKS_CLUSTER: 'myAKSCluster'
-  RESOURCE_GROUP: 'myResourceGroup'
-
-pool:
-  vmImage: 'ubuntu-latest'
-
-stages:
-- stage: Deploy
-  displayName: 'Deploy to AKS'
-  jobs:
-  - job: Deploy
-    steps:
-    # 1. Checkout and setup
-    - checkout: self
-    
-    # 2. Connect to AKS and grant ACR access
-    - task: AzureCLI@2
-      displayName: 'Connect to AKS'
-      inputs:
-        azureSubscription: 'serviceconnection-azurecli'
-        scriptType: 'bash'
-        inlineScript: |
-          az aks get-credentials -g $(RESOURCE_GROUP) -n $(AKS_CLUSTER)
-          az aks update -g $(RESOURCE_GROUP) -n $(AKS_CLUSTER) --attach-acr $(ACR_NAME)
-
-    # 3. Get the EXACT build ID from CI pipeline
-    - script: |
-        CI_BUILD_ID=$(resources.pipeline.buildPipeline.runID)
-        echo "##vso[task.setvariable variable=BUILD_TAG]$CI_BUILD_ID"
-        echo "Using build ID from CI pipeline: $CI_BUILD_ID"
-      displayName: 'Get CI Build ID'
-
-    # 4. Verify image exists in ACR before deployment
-    - script: |
-        if ! az acr repository show \
-          --name $(ACR_NAME) \
-          --image springboot-app:$(BUILD_TAG) > /dev/null; then
-          echo "##vso[task.logissue type=error]Image springboot-app:$(BUILD_TAG) not found in ACR!"
-          exit 1
-        fi
-      displayName: 'Verify Image Exists'
-
-    # 5. Deploy using kubectl (simpler than YAML replacement)
-    - script: |
-        kubectl set image deployment/my-springboot-deployment \
-          my-springboot-app=$(ACR_NAME).azurecr.io/springboot-app:$(BUILD_TAG)
-      displayName: 'Deploy to AKS'
-
-    # 6. Verify deployment
-    - script: |
-        kubectl rollout status deployment/my-springboot-deployment --timeout=300s
-        echo ""
-        echo "Current pods:"
-        kubectl get pods -l app=springboot-app
-      displayName: 'Verify Deployment'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-springboot-deployment
+  labels:
+    app: springboot-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: springboot-app
+  template:
+    metadata:
+      labels:
+        app: springboot-app
+    spec:
+      containers:
+      - name: my-springboot-app
+        image: myacrrepo7066.azurecr.io/springboot-app:__IMAGE_TAG__  # Will be replaced by CD pipeline
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: springboot-app-service
+  labels:
+    app: springboot-app
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: springboot-app
