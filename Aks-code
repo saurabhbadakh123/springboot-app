@@ -8,26 +8,32 @@ steps:
     testResultsFiles: '**/surefire-reports/TEST-*.xml'
   displayName: 'Build Spring Boot App'
 
-# 2. Prepare Docker build context
+# 2. Verify JAR exists
 - script: |
-    echo "Checking for JAR file..."
-    ls -la springboot-app-main/target/*.jar
-    
-    echo "Creating docker directory..."
-    mkdir -p springboot-app-main/docker
-    
-    echo "Copying JAR file..."
-    cp springboot-app-main/target/*.jar springboot-app-main/docker/
-    
-    echo "Verifying copy..."
-    ls -la springboot-app-main/docker/
-  displayName: 'Prepare Docker Build Context'
+    echo "--- Checking JAR file location ---"
+    find . -name "*.jar" -exec ls -la {} \;
+    JAR_PATH=$(find . -name "*.jar" | head -1)
+    echo "##vso[task.setvariable variable=JAR_PATH]$JAR_PATH"
+    echo "Found JAR at: $JAR_PATH"
+  displayName: 'Locate JAR File'
 
-# 3. Build and push Docker image
+# 3. Build Docker image (directly using found JAR path)
 - script: |
-    echo "Building image with tag: $(tag)"
-    cd springboot-app-main/docker
-    docker build -t $(acrLoginServer)/$(imageRepository):$(tag) -f ../Dockerfile .
-    docker images
+    echo "--- Building Docker image ---"
+    echo "Using JAR from: $(JAR_PATH)"
+    docker build \
+      -t $(acrLoginServer)/$(imageRepository):$(tag) \
+      --build-arg JAR_FILE=$(JAR_PATH) \
+      -f springboot-app-main/Dockerfile \
+      springboot-app-main/
+    
+    echo "--- Pushing to ACR ---"
     docker push $(acrLoginServer)/$(imageRepository):$(tag)
   displayName: 'Build and Push Docker Image'
+
+# Must use this exact Dockerfile
+FROM eclipse-temurin:17-jdk
+ARG JAR_FILE
+WORKDIR /app
+COPY ${JAR_FILE} app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
