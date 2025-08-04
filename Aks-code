@@ -5,14 +5,15 @@ variables:
   imageRepository: 'springboot-app'
   containerRegistry: 'myacrrepo7066.azurecr.io'
   dockerfilePath: 'springboot-app-main/Dockerfile'
-  tag: '$(Build.BuildId)'  # Fixed variable name
+  tag: '$(Build.BuildId)'
   acrLoginServer: 'myacrrepo7066.azurecr.io'
 
 pool:
   vmImage: 'ubuntu-latest'
 
 steps:
-- task: Maven@3  # Fixed typo (was Naven@3)
+# 1. Build Java application
+- task: Maven@3
   inputs:
     mavenPomFile: 'springboot-app-main/pom.xml'
     goals: 'package'
@@ -20,23 +21,29 @@ steps:
     testResultsFiles: '**/surefire-reports/TEST-*.xml'
   displayName: 'Build Spring Boot App'
 
-- task: Docker@2
-  displayName: 'Build and Push Docker Image'
-  inputs:
-    command: 'buildAndPush'
-    repository: '$(imageRepository)'  # Fixed parentheses
-    dockerfile: '$(dockerfilePath)'   # Fixed parentheses
-    containerRegistry: '$(dockerRegistryServiceConnection)'  # Fixed parentheses
-    tags: '$(tag)'
+# 2. Verify JAR exists before Docker build
+- script: |
+    echo "Checking for JAR file..."
+    ls -la springboot-app-main/target/*.jar
+    cp springboot-app-main/target/*.jar springboot-app-main/docker/
+  displayName: 'Prepare Docker Build Context'
 
-- task: AzureCLI@2  # More reliable than plain script
+# 3. Build and push Docker image
+- script: |
+    echo "Building image with tag: $(tag)"
+    cd springboot-app-main/docker
+    docker build -t $(acrLoginServer)/$(imageRepository):$(tag) .
+    docker images
+    docker push $(acrLoginServer)/$(imageRepository):$(tag)
+  displayName: 'Build and Push Docker Image'
+
+# 4. Verify image in ACR
+- task: AzureCLI@2
   displayName: 'Validate ACR Image'
   inputs:
-    azureSubscription: 'for-modifiedcode'  # Same as dockerRegistryServiceConnection
+    azureSubscription: 'for-modifiedcode'
     scriptType: 'bash'
     scriptLocation: 'inlineScript'
     inlineScript: |
       echo "Verifying image exists: $(acrLoginServer)/$(imageRepository):$(tag)"
-      az acr repository show \
-        --name myacrrepo7066 \
-        --image $(imageRepository):$(tag) || exit 1
+      az acr repository show --name myacrrepo7066 --image $(imageRepository):$(tag)
