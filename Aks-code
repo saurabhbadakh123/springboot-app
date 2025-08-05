@@ -1,12 +1,4 @@
-az aks get-credentials `
-  --resource-group pythonapp-rg `
-  --name pythonapp-aks `
-  --overwrite-existing `
-  --admin  # Bypasses certificate validation
-
-# Export cluster CA certificate
-az aks get-credentials --resource-group pythonapp-rg --name pythonapp-aks --file cert.pem
-
-# Add to trusted store (Windows)
-Import-Certificate -FilePath .\cert.pem -CertStoreLocation Cert:\CurrentUser\Root
-
+- script: |
+    az aks get-credentials -n pythonapp-aks -g pythonapp-rg --overwrite-existing --admin
+    kubectl get nodes
+  displayName: 'Fix Certificate Issue'
