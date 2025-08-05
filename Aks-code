@@ -1,41 +1,29 @@
-FROM python:3.9-slim
+# Stage 1: Base image
+FROM python:3.9-slim AS builder
 
-# Create and set workdir PROPERLY
-RUN mkdir -p /app
+# Create and set workdir (MUST come before COPY)
 WORKDIR /app
 
-# Copy requirements FIRST (with absolute dest path)
-COPY requirements.txt /app/requirements.txt
+# Copy ONLY requirements first (best practice)
+COPY requirements.txt .
 
 # Install dependencies
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --user -r requirements.txt
 
-# Copy ALL files (using absolute paths)
-COPY . /app/
+# Stage 2: Runtime image
+FROM python:3.9-slim
 
-# Run command
+# Create final workdir
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /root/.local /root/.local
+
+# Copy application files
+COPY . .
+
+# Ensure scripts in .local are usable
+ENV PATH=/root/.local/bin:$PATH
+
+# Run application
 CMD ["python", "app.py"]
-
-steps:
-- checkout: self
-
-# Clean up any previous build context
-- script: |
-    docker system prune -a -f
-    echo "##[section] Current directory contents:"
-    ls -la
-    echo "##[section] Dockerfile contents:"
-    cat Dockerfile
-  displayName: 'Clean and Verify'
-
-- task: Docker@2
-  displayName: 'Build and Push'
-  inputs:
-    command: 'buildAndPush'
-    repository: $(imageName)
-    dockerfile: 'Dockerfile'
-    containerRegistry: 'python-sc'
-    buildContext: '.'  # Explicitly set build context
-    tags: |
-      latest
-      $(Build.BuildId)
