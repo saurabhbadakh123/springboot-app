@@ -1,4 +1,5 @@
-- script: |
-    az aks get-credentials -n pythonapp-aks -g pythonapp-rg --overwrite-existing --admin
-    kubectl get nodes
-  displayName: 'Fix Certificate Issue'
+# Export cluster certificate
+az aks get-credentials --resource-group pythonapp-rg --name pythonapp-aks --file cluster-cert.pem
+
+# Trust the certificate (Windows)
+Import-Certificate -FilePath .\cluster-cert.pem -CertStoreLocation Cert:\CurrentUser\Root
