@@ -1,29 +1,15 @@
-# Stage 1: Base image
-FROM python:3.9-slim AS builder
-
-# Create and set workdir (MUST come before COPY)
-WORKDIR /app
-
-# Copy ONLY requirements first (best practice)
-COPY requirements.txt .
-
-# Install dependencies
-RUN pip install --user -r requirements.txt
-
-# Stage 2: Runtime image
 FROM python:3.9-slim
 
-# Create final workdir
+# Create and set working directory
+RUN mkdir -p /app
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
+# Copy requirements and install
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 
-# Copy application files
+# Copy app files
 COPY . .
 
-# Ensure scripts in .local are usable
-ENV PATH=/root/.local/bin:$PATH
-
-# Run application
+# Run the app
 CMD ["python", "app.py"]
