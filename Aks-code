@@ -1,16 +1,41 @@
 trigger:
-- main
+- master
+
+pool: mynewagent  # Ensure this agent has Docker/kubectl installed
+
+variables:
+  acrName: 'myacrrepo7066'  # Just the ACR name (no .azurecr.io)
+  imageName: 'python-app'
 
 steps:
-# Step 1: Build and push to ACR
+- checkout: self  # Get your code
+
+# Authenticate with ACR
+- task: AzureCLI@2
+  displayName: 'Login to ACR'
+  inputs:
+    azureSubscription: 'service-connection'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      az acr login --name $(acrName)
+
+# Build and push image
 - script: |
-    docker build -t pythonappacr123.azurecr.io/python-app:latest .
-    az acr login --name pythonappacr123
-    docker push pythonappacr123.azurecr.io/python-app:latest
+    docker build -t $(acrName).azurecr.io/$(imageName):latest .
+    docker push $(acrName).azurecr.io/$(imageName):latest
   displayName: 'Build and Push'
 
-# Step 2: Deploy to AKS
-- script: |
-    az aks get-credentials --resource-group pythonapp-rg --name pythonapp-aks --overwrite-existing
-    kubectl apply -f k8s-deployment.yml
-  displayName: 'Deploy'
+# Deploy to AKS
+- task: AzureCLI@2
+  displayName: 'Deploy to AKS'
+  inputs:
+    azureSubscription: 'service-connection'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      az aks get-credentials \
+        --resource-group pythonapp-rg \
+        --name pythonapp-aks \
+        --overwrite-existing
+      kubectl apply -f k8s-deployment.yml
