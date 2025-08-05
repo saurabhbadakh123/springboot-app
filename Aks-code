@@ -1,25 +1,12 @@
-- task: AzureCLI@2
-  displayName: 'Force Rollout'
-  inputs:
-    azureSubscription: 'service-connection'
-    scriptType: 'bash'
-    scriptLocation: 'inlineScript'
-    inlineScript: |
-      # Refresh AKS credentials (critical)
-      az aks get-credentials \
-        --resource-group pythonapp-rg \
-        --name pythonapp-aks \
-        --overwrite-existing \
-        --admin  # Bypasses RBAC issues
-      
-      # Verify connection
-      kubectl cluster-info
-      
-      # Force rollout
-      kubectl rollout restart deployment/python-app -n default
-      
-      # Monitor with timeout
-      kubectl rollout status deployment/python-app -n default --timeout=120s
-      
-      # Final verification
-      kubectl get pods -n default -w
+az aks get-credentials `
+  --resource-group pythonapp-rg `
+  --name pythonapp-aks `
+  --overwrite-existing `
+  --admin  # Bypasses certificate validation
+
+# Export cluster CA certificate
+az aks get-credentials --resource-group pythonapp-rg --name pythonapp-aks --file cert.pem
+
+# Add to trusted store (Windows)
+Import-Certificate -FilePath .\cert.pem -CertStoreLocation Cert:\CurrentUser\Root
+
