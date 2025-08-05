@@ -1,41 +1,15 @@
-trigger:
-- master
+FROM python:3.9-slim
 
-pool: mynewagent  # Ensure this agent has Docker/kubectl installed
+WORKDIR /app
 
-variables:
-  acrName: 'myacrrepo7066'  # Just the ACR name (no .azurecr.io)
-  imageName: 'python-app'
+# 1. Copy requirements first (best practice)
+COPY requirements.txt .  # Note the space before the dot
 
-steps:
-- checkout: self  # Get your code
+# 2. Install dependencies
+RUN pip install -r requirements.txt
 
-# Authenticate with ACR
-- task: AzureCLI@2
-  displayName: 'Login to ACR'
-  inputs:
-    azureSubscription: 'service-connection'
-    scriptType: 'bash'
-    scriptLocation: 'inlineScript'
-    inlineScript: |
-      az acr login --name $(acrName)
+# 3. Copy ALL other files (proper syntax)
+COPY . .  # First dot = source, second dot = destination (/app)
 
-# Build and push image
-- script: |
-    docker build -t $(acrName).azurecr.io/$(imageName):latest .
-    docker push $(acrName).azurecr.io/$(imageName):latest
-  displayName: 'Build and Push'
-
-# Deploy to AKS
-- task: AzureCLI@2
-  displayName: 'Deploy to AKS'
-  inputs:
-    azureSubscription: 'service-connection'
-    scriptType: 'bash'
-    scriptLocation: 'inlineScript'
-    inlineScript: |
-      az aks get-credentials \
-        --resource-group pythonapp-rg \
-        --name pythonapp-aks \
-        --overwrite-existing
-      kubectl apply -f k8s-deployment.yml
+# 4. Run command
+CMD ["python", "app.py"]
