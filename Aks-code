@@ -1,37 +1,6 @@
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: python-app
-  namespace: default  # Explicitly set namespace
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: python-app
-  template:
-    metadata:
-      labels:
-        app: python-app
-    spec:
-      containers:
-      - name: python-app
-        image: pythonappacr123.azurecr.io/python-app:latest  # Must match your ACR
-        imagePullPolicy: Always  # Force fresh pulls
-        ports:
-        - containerPort: 80
-      imagePullSecrets:  # Only needed if ACR auth fails
-      - name: acr-auth
+az aks get-credentials --resource-group pythonapp-rg --name pythonapp-aks --overwrite-existing --admin
 
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: python-app-service
-  namespace: default
-spec:
-  type: LoadBalancer  # External access
-  ports:
-  - port: 80
-    targetPort: 80
-  selector:
-    app: python-app
+
+kubectl get pods --insecure-skip-tls-verify=true
+
+
