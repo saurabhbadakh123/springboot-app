@@ -1,15 +1,41 @@
 FROM python:3.9-slim
 
+# Create and set workdir PROPERLY
+RUN mkdir -p /app
 WORKDIR /app
 
-# 1. Copy requirements first (best practice)
-COPY requirements.txt .  # Note the space before the dot
+# Copy requirements FIRST (with absolute dest path)
+COPY requirements.txt /app/requirements.txt
 
-# 2. Install dependencies
-RUN pip install -r requirements.txt
+# Install dependencies
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# 3. Copy ALL other files (proper syntax)
-COPY . .  # First dot = source, second dot = destination (/app)
+# Copy ALL files (using absolute paths)
+COPY . /app/
 
-# 4. Run command
+# Run command
 CMD ["python", "app.py"]
+
+steps:
+- checkout: self
+
+# Clean up any previous build context
+- script: |
+    docker system prune -a -f
+    echo "##[section] Current directory contents:"
+    ls -la
+    echo "##[section] Dockerfile contents:"
+    cat Dockerfile
+  displayName: 'Clean and Verify'
+
+- task: Docker@2
+  displayName: 'Build and Push'
+  inputs:
+    command: 'buildAndPush'
+    repository: $(imageName)
+    dockerfile: 'Dockerfile'
+    containerRegistry: 'python-sc'
+    buildContext: '.'  # Explicitly set build context
+    tags: |
+      latest
+      $(Build.BuildId)
