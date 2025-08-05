@@ -1,98 +1,16 @@
-provider "azurerm" {
-  features {}
-}
-
-resource "azurerm_resource_group" "rg" {
-  name     = "pythonapp-rg"
-  location = "East US"
-}
-
-resource "azurerm_container_registry" "acr" {
-  name                = "pythonappacr123"
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
-  sku                 = "Basic"
-  admin_enabled       = true
-}
-
-resource "azurerm_kubernetes_cluster" "aks" {
-  name                = "pythonapp-aks"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
-  dns_prefix          = "pythonappaks"
-  
-  default_node_pool {
-    name       = "default"
-    node_count = 1
-    vm_size    = "Standard_D2_v2"
-  }
-
-  identity {
-    type = "SystemAssigned"
-  }
-}
-
+trigger:
+- main
 
 steps:
-- checkout: self
-
-# Log in to ACR
-- task: AzureCLI@2
-  inputs:
-    azureSubscription: 'service-connection'
-    scriptType: 'bash'
-    scriptLocation: 'inlineScript'
-    inlineScript: |
-      az acr login --name myacrrepo7066
-
-# Build and push Docker image
+# Step 1: Build and push to ACR
 - script: |
-    docker build -t $(acrLoginServer)/$(imageName):latest .
-    docker push $(acrLoginServer)/$(imageName):latest
-  displayName: 'Build and Push Docker Image'
+    docker build -t pythonappacr123.azurecr.io/python-app:latest .
+    az acr login --name pythonappacr123
+    docker push pythonappacr123.azurecr.io/python-app:latest
+  displayName: 'Build and Push'
 
-# Set context and deploy to AKS
-- task: Kubernetes@1
-  inputs:
-    connectionType: 'Azure Resource Manager'
-    azureSubscription: 'service-connection'
-    azureResourceGroup: 'pythonapp-rg'
-    kubernetesCluster: 'pythonapp-aks'
-    namespace: 'default'
-    command: 'apply'
-    useConfigurationFile: true
-    configuration: 'k8s-deployment.yml'
-
-
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: python-app
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: python-app
-  template:
-    metadata:
-      labels:
-        app: python-app
-    spec:
-      containers:
-      - name: python-app
-        image: myacrrepo7066.azurecr.io/python-app:latest
-        ports:
-        - containerPort: 80
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: python-app-service
-spec:
-  type: LoadBalancer
-  ports:
-  - port: 80
-    targetPort: 80
-  selector:
-    app: python-app
+# Step 2: Deploy to AKS
+- script: |
+    az aks get-credentials --resource-group pythonapp-rg --name pythonapp-aks --overwrite-existing
+    kubectl apply -f k8s-deployment.yml
+  displayName: 'Deploy'
