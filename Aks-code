@@ -1,34 +1,37 @@
-steps:
-- checkout: self
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-app
+  namespace: default  # Explicitly set namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: python-app
+  template:
+    metadata:
+      labels:
+        app: python-app
+    spec:
+      containers:
+      - name: python-app
+        image: pythonappacr123.azurecr.io/python-app:latest  # Must match your ACR
+        imagePullPolicy: Always  # Force fresh pulls
+        ports:
+        - containerPort: 80
+      imagePullSecrets:  # Only needed if ACR auth fails
+      - name: acr-auth
 
-# 1. Build and push image
-- task: Docker@2
-  displayName: 'Build and Push'
-  inputs:
-    command: 'buildAndPush'
-    repository: 'python-app'
-    dockerfile: 'Dockerfile'
-    containerRegistry: 'python-sc'
-    tags: 'latest'
-
-# 2. Deploy to AKS (with fixes)
-- task: AzureCLI@2
-  displayName: 'Deploy to AKS'
-  timeoutInMinutes: 2  # Prevents hanging
-  inputs:
-    azureSubscription: 'service-connection'
-    scriptType: 'bash'
-    scriptLocation: 'inlineScript'
-    inlineScript: |
-      # Get AKS credentials
-      az aks get-credentials \
-        --resource-group pythonapp-rg \
-        --name pythonapp-aks \
-        --overwrite-existing
-
-      # Apply deployment (absolute path)
-      kubectl apply -f $(Build.SourcesDirectory)/k8s-deployment.yml
-
-      # Quick verification (no -w flag)
-      kubectl get pods
-      echo "Deployment completed successfully"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: python-app-service
+  namespace: default
+spec:
+  type: LoadBalancer  # External access
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: python-app
