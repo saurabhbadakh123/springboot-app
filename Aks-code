@@ -1,39 +1,98 @@
+provider "azurerm" {
+  features {}
+}
+
+resource "azurerm_resource_group" "rg" {
+  name     = "pythonapp-rg"
+  location = "East US"
+}
+
+resource "azurerm_container_registry" "acr" {
+  name                = "pythonappacr123"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  sku                 = "Basic"
+  admin_enabled       = true
+}
+
+resource "azurerm_kubernetes_cluster" "aks" {
+  name                = "pythonapp-aks"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  dns_prefix          = "pythonappaks"
+  
+  default_node_pool {
+    name       = "default"
+    node_count = 1
+    vm_size    = "Standard_D2_v2"
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+}
+
+
 steps:
-# 1. Build Java application
-- task: Maven@3
+- checkout: self
+
+# Log in to ACR
+- task: AzureCLI@2
   inputs:
-    mavenPomFile: 'springboot-app-main/pom.xml'
-    goals: 'package'
-    publishJUnitResults: true
-    testResultsFiles: '**/surefire-reports/TEST-*.xml'
-  displayName: 'Build Spring Boot App'
+    azureSubscription: 'service-connection'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      az acr login --name myacrrepo7066
 
-# 2. Verify JAR exists
+# Build and push Docker image
 - script: |
-    echo "--- Checking JAR file location ---"
-    find . -name "*.jar" -exec ls -la {} \;
-    JAR_PATH=$(find . -name "*.jar" | head -1)
-    echo "##vso[task.setvariable variable=JAR_PATH]$JAR_PATH"
-    echo "Found JAR at: $JAR_PATH"
-  displayName: 'Locate JAR File'
-
-# 3. Build Docker image (directly using found JAR path)
-- script: |
-    echo "--- Building Docker image ---"
-    echo "Using JAR from: $(JAR_PATH)"
-    docker build \
-      -t $(acrLoginServer)/$(imageRepository):$(tag) \
-      --build-arg JAR_FILE=$(JAR_PATH) \
-      -f springboot-app-main/Dockerfile \
-      springboot-app-main/
-    
-    echo "--- Pushing to ACR ---"
-    docker push $(acrLoginServer)/$(imageRepository):$(tag)
+    docker build -t $(acrLoginServer)/$(imageName):latest .
+    docker push $(acrLoginServer)/$(imageName):latest
   displayName: 'Build and Push Docker Image'
 
-# Must use this exact Dockerfile
-FROM eclipse-temurin:17-jdk
-ARG JAR_FILE
-WORKDIR /app
-COPY ${JAR_FILE} app.jar
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Set context and deploy to AKS
+- task: Kubernetes@1
+  inputs:
+    connectionType: 'Azure Resource Manager'
+    azureSubscription: 'service-connection'
+    azureResourceGroup: 'pythonapp-rg'
+    kubernetesCluster: 'pythonapp-aks'
+    namespace: 'default'
+    command: 'apply'
+    useConfigurationFile: true
+    configuration: 'k8s-deployment.yml'
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: python-app
+  template:
+    metadata:
+      labels:
+        app: python-app
+    spec:
+      containers:
+      - name: python-app
+        image: myacrrepo7066.azurecr.io/python-app:latest
+        ports:
+        - containerPort: 80
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: python-app-service
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: python-app
