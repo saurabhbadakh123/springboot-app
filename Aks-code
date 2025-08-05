@@ -1,15 +1,19 @@
-FROM python:3.9-slim
-
-# Create and set working directory
-RUN mkdir -p /app
-WORKDIR /app
-
-# Copy requirements and install
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-# Copy app files
-COPY . .
-
-# Run the app
-CMD ["python", "app.py"]
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: python-app
+  template:
+    metadata:
+      labels:
+        app: python-app
+    spec:
+      containers:
+      - name: python-app
+        image: pythonappacr123.azurecr.io/python-app:latest
+        ports:
+        - containerPort: 80
