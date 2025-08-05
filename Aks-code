@@ -1,20 +1,18 @@
-# Use official Python base image
-FROM python:3.9-slim
-
-# Set working directory
-WORKDIR /app
-
-# Copy only requirements first (optimizes caching)
-COPY requirements.txt .
-
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
-COPY . .
-
-# Expose port (optional, for documentation)
-EXPOSE 80
-
-# Run the application
-CMD ["python", "app.py"]
+- task: AzureCLI@2
+  displayName: 'Deploy to AKS'
+  inputs:
+    azureSubscription: 'service-connection'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      az aks get-credentials -n pythonapp-aks -g pythonapp-rg --overwrite-existing
+      
+      # Apply changes
+      kubectl apply -f k8s-deployment.yml
+      
+      # Force new pods
+      kubectl rollout restart deployment/python-app
+      kubectl rollout status deployment/python-app --timeout=90s
+      
+      # Verify
+      kubectl get pods -w
