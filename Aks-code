@@ -1,19 +1,54 @@
+steps:
+- checkout: self
+
+# 1. Build and push image (existing working step)
+- task: Docker@2
+  displayName: 'Build and Push'
+  inputs:
+    command: 'buildAndPush'
+    repository: 'python-app'
+    dockerfile: 'Dockerfile'
+    containerRegistry: 'python-sc'
+    tags: 'latest'
+
+# 2. Deploy to AKS (simplified)
+- task: AzureCLI@2
+  displayName: 'Deploy to AKS'
+  inputs:
+    azureSubscription: 'service-connection'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      # Get AKS credentials
+      az aks get-credentials \
+        --resource-group pythonapp-rg \
+        --name pythonapp-aks \
+        --overwrite-existing
+
+      # Apply deployment
+      kubectl apply -f aks-deploy-from-acr.yaml
+
+      # Verify
+      kubectl get pods -w
+
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: python-app
+  name: springboot-app
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: python-app
+      app: springboot-app
   template:
     metadata:
       labels:
-        app: python-app
+        app: springboot-app
     spec:
       containers:
-      - name: python-app
-        image: pythonappacr123.azurecr.io/python-app:latest
+      - name: app
+        image: pythonappacr123.azurecr.io/python-app:latest  # Hardcoded for now
         ports:
-        - containerPort: 80
+        - containerPort: 8080
+        imagePullPolicy: Always  # Critical for updates
