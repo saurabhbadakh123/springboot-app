@@ -1,7 +1,7 @@
 steps:
 - checkout: self
 
-# 1. Build and push image (existing working step)
+# 1. Build and push image
 - task: Docker@2
   displayName: 'Build and Push'
   inputs:
@@ -11,9 +11,10 @@ steps:
     containerRegistry: 'python-sc'
     tags: 'latest'
 
-# 2. Deploy to AKS (simplified)
+# 2. Deploy to AKS (with fixes)
 - task: AzureCLI@2
   displayName: 'Deploy to AKS'
+  timeoutInMinutes: 2  # Prevents hanging
   inputs:
     azureSubscription: 'service-connection'
     scriptType: 'bash'
@@ -25,30 +26,9 @@ steps:
         --name pythonapp-aks \
         --overwrite-existing
 
-      # Apply deployment
-      kubectl apply -f aks-deploy-from-acr.yaml
+      # Apply deployment (absolute path)
+      kubectl apply -f $(Build.SourcesDirectory)/k8s-deployment.yml
 
-      # Verify
-      kubectl get pods -w
-
-
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: springboot-app
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: springboot-app
-  template:
-    metadata:
-      labels:
-        app: springboot-app
-    spec:
-      containers:
-      - name: app
-        image: pythonappacr123.azurecr.io/python-app:latest  # Hardcoded for now
-        ports:
-        - containerPort: 8080
-        imagePullPolicy: Always  # Critical for updates
+      # Quick verification (no -w flag)
+      kubectl get pods
+      echo "Deployment completed successfully"
